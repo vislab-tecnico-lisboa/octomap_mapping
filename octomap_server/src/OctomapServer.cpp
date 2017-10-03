@@ -438,12 +438,23 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   // mark free cells only if not seen occupied in this cloud
   for(KeySet::iterator it = free_cells.begin(), end=free_cells.end(); it!= end; ++it){
     if (occupied_cells.find(*it) == occupied_cells.end()){
+        double p = ((double) rand() / (RAND_MAX));
+        if (is_equal(p, 0.0))
+          p += 1.0e-6;
+        m_octree->setProbMiss(0.5*p);
       m_octree->updateNode(*it, false);
     }
   }
 
   // now mark all occupied cells:
   for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
+      double p = ((double) rand() / (RAND_MAX));
+      // Checking values that might create unexpected behaviors.
+
+       if(p<=0.5)
+           p=0.5;
+       m_octree->setProbHit(p);
+
     m_octree->updateNode(*it, true);
   }
 
