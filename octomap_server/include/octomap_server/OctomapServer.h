@@ -57,6 +57,9 @@
 #include <tf/transform_listener.h>
 #include <tf/message_filter.h>
 #include <message_filters/subscriber.h>
+#include <message_filters/time_synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
+
 #include <octomap_msgs/Octomap.h>
 #include <octomap_msgs/GetOctomap.h>
 #include <octomap_msgs/BoundingBoxQuery.h>
@@ -71,7 +74,7 @@
 #ifdef COLOR_OCTOMAP_SERVER
 #include <octomap/ColorOcTree.h>
 #endif
-
+using namespace message_filters;
 namespace octomap_server {
 class OctomapServer {
 
@@ -85,6 +88,8 @@ public:
   typedef pcl::PointCloud<pcl::PointXYZ> PCLPointCloud;
   typedef octomap::OcTree OcTreeT;
 #endif
+  typedef pcl::PointXYZI PCLPointUncertainty;
+  typedef pcl::PointCloud<pcl::PointXYZI> PCLPointCloudUncertainty;
   typedef octomap_msgs::GetOctomap OctomapSrv;
   typedef octomap_msgs::BoundingBoxQuery BBXSrv;
 
@@ -96,6 +101,8 @@ public:
   bool resetSrv(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
   virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
+  virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::PointCloud2::ConstPtr& uncertainty);
+
   virtual bool openFile(const std::string& filename);
 
 protected:
@@ -134,9 +141,11 @@ protected:
   * @param nonground all other endpoints (clear up to occupied endpoint)
   */
   virtual void insertScan(const tf::Point& sensorOrigin, const PCLPointCloud& ground, const PCLPointCloud& nonground);
+  virtual void insertScan(const tf::Point& sensorOrigin, const PCLPointCloud& ground, const PCLPointCloud& nonground, const PCLPointCloudUncertainty& uncertainty_ground, const PCLPointCloudUncertainty& uncertainty_nonground);
 
   /// label the input cloud "pc" into ground and nonground. Should be in the robot's fixed frame (not world!)
   void filterGroundPlane(const PCLPointCloud& pc, PCLPointCloud& ground, PCLPointCloud& nonground) const;
+  void filterGroundPlane(const PCLPointCloud& pc, const PCLPointCloudUncertainty& pc_uncertainty, PCLPointCloud& ground, PCLPointCloud& nonground, PCLPointCloudUncertainty& uncertainty_ground, PCLPointCloudUncertainty& uncertainty_nonground) const;
 
   /**
   * @brief Find speckle nodes (single occupied voxels with no neighbors). Only works on lowest resolution!
@@ -202,6 +211,10 @@ protected:
   ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub;
   message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
   tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
+  message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudUncertaintySub;
+  tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudUncertaintySub;
+  typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> MySyncPolicy;
+  boost::shared_ptr<Synchronizer<MySyncPolicy> >sync;
   ros::ServiceServer m_octomapBinaryService, m_octomapFullService, m_clearBBXService, m_resetService;
   tf::TransformListener m_tfListener;
   boost::recursive_mutex m_config_mutex;

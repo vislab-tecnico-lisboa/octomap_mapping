@@ -43,6 +43,8 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 : m_nh(),
   m_pointCloudSub(NULL),
   m_tfPointCloudSub(NULL),
+  m_pointCloudUncertaintySub(NULL),
+  m_tfPointCloudUncertaintySub(NULL),
   m_reconfigureServer(m_config_mutex),
   m_octree(NULL),
   m_maxRange(-1.0),
@@ -175,7 +177,14 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
 
   m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_in", 5);
   m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
-  m_tfPointCloudSub->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1));
+  //m_tfPointCloudSub->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1));
+
+  m_pointCloudUncertaintySub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_uncertainty_in", 5);
+  m_tfPointCloudUncertaintySub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
+
+
+  sync=boost::shared_ptr<Synchronizer<MySyncPolicy> > (new Synchronizer<MySyncPolicy>(MySyncPolicy(10), *m_tfPointCloudSub, *m_pointCloudUncertaintySub));
+  sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1, _2));
 
   m_octomapBinaryService = m_nh.advertiseService("octomap_binary", &OctomapServer::octomapBinarySrv, this);
   m_octomapFullService = m_nh.advertiseService("octomap_full", &OctomapServer::octomapFullSrv, this);
@@ -257,6 +266,105 @@ bool OctomapServer::openFile(const std::string& filename){
 
   return true;
 
+}
+
+void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::PointCloud2::ConstPtr& uncertainty){
+  ros::WallTime startTime = ros::WallTime::now();
+ 	ROS_ERROR_STREAM("ENNNNNNNNNNNTREI");
+
+  //
+  // ground filtering in base frame
+  //
+  PCLPointCloud pc; // input cloud for filtering and ground-detection
+  pcl::fromROSMsg(*cloud, pc);
+
+  PCLPointCloudUncertainty pc_uncertainty; // input cloud for filtering and ground-detection
+  pcl::fromROSMsg(*uncertainty, pc_uncertainty);
+
+  tf::StampedTransform sensorToWorldTf;
+  try {
+    m_tfListener.lookupTransform(m_worldFrameId, cloud->header.frame_id, cloud->header.stamp, sensorToWorldTf);
+  } catch(tf::TransformException& ex){
+    ROS_ERROR_STREAM( "Transform error of sensor data: " << ex.what() << ", quitting callback");
+    return;
+  }
+
+  Eigen::Matrix4f sensorToWorld;
+  pcl_ros::transformAsMatrix(sensorToWorldTf, sensorToWorld);
+
+
+  // set up filter for height range, also removes NANs:
+  pcl::PassThrough<PCLPoint> pass_x;
+  pass_x.setFilterFieldName("x");
+  pass_x.setFilterLimits(m_pointcloudMinX, m_pointcloudMaxX);
+  pcl::PassThrough<PCLPoint> pass_y;
+  pass_y.setFilterFieldName("y");
+  pass_y.setFilterLimits(m_pointcloudMinY, m_pointcloudMaxY);
+  pcl::PassThrough<PCLPoint> pass_z;
+  pass_z.setFilterFieldName("z");
+  pass_z.setFilterLimits(m_pointcloudMinZ, m_pointcloudMaxZ);
+
+  PCLPointCloud pc_ground; // segmented ground plane
+  PCLPointCloud pc_nonground; // everything else
+  PCLPointCloudUncertainty pc_ground_uncertainty; // segmented ground plane
+  PCLPointCloudUncertainty pc_nonground_uncertainty; // everything else
+
+  if (m_filterGroundPlane){
+    tf::StampedTransform sensorToBaseTf, baseToWorldTf;
+    try{
+      m_tfListener.waitForTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, ros::Duration(0.2));
+      m_tfListener.lookupTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, sensorToBaseTf);
+      m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, cloud->header.stamp, baseToWorldTf);
+
+
+    }catch(tf::TransformException& ex){
+      ROS_ERROR_STREAM( "Transform error for ground plane filter: " << ex.what() << ", quitting callback.\n"
+                        "You need to set the base_frame_id or disable filter_ground.");
+    }
+
+
+    Eigen::Matrix4f sensorToBase, baseToWorld;
+    pcl_ros::transformAsMatrix(sensorToBaseTf, sensorToBase);
+    pcl_ros::transformAsMatrix(baseToWorldTf, baseToWorld);
+
+    // transform pointcloud from sensor frame to fixed robot frame
+    pcl::transformPointCloud(pc, pc, sensorToBase);
+    pass_x.setInputCloud(pc.makeShared());
+    pass_x.filter(pc);
+    pass_y.setInputCloud(pc.makeShared());
+    pass_y.filter(pc);
+    pass_z.setInputCloud(pc.makeShared());
+    pass_z.filter(pc);
+    filterGroundPlane(pc, pc_uncertainty, pc_ground,pc_nonground,pc_ground_uncertainty,pc_nonground_uncertainty);
+
+    // transform clouds to world frame for insertion
+    pcl::transformPointCloud(pc_ground, pc_ground, baseToWorld);
+    pcl::transformPointCloud(pc_nonground, pc_nonground, baseToWorld);
+  } else {
+    // directly transform to map frame:
+    pcl::transformPointCloud(pc, pc, sensorToWorld);
+
+    // just filter height range:
+    pass_x.setInputCloud(pc.makeShared());
+    pass_x.filter(pc);
+    pass_y.setInputCloud(pc.makeShared());
+    pass_y.filter(pc);
+    pass_z.setInputCloud(pc.makeShared());
+    pass_z.filter(pc);
+
+    pc_nonground = pc;
+    // pc_nonground is empty without ground segmentation
+    pc_ground.header = pc.header;
+    pc_nonground.header = pc.header;
+  }
+
+
+  insertScan(sensorToWorldTf.getOrigin(), pc_ground, pc_nonground,pc_ground_uncertainty,pc_nonground_uncertainty);
+
+  double total_elapsed = (ros::WallTime::now() - startTime).toSec();
+  ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
+
+  publishAll(cloud->header.stamp);
 }
 
 void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
@@ -353,6 +461,149 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
   publishAll(cloud->header.stamp);
 }
 
+
+void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground, const PCLPointCloudUncertainty& uncertainty_ground, const PCLPointCloudUncertainty& uncertainty_nonground){
+  point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
+
+  if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin)
+    || !m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMax))
+  {
+    ROS_ERROR_STREAM("Could not generate Key for origin "<<sensorOrigin);
+  }
+
+#ifdef COLOR_OCTOMAP_SERVER
+  unsigned char* colors = new unsigned char[3];
+#endif
+
+  // instead of direct scan insertion, compute update to filter ground:
+  KeySet free_cells, occupied_cells;
+  // insert ground points only as free:
+  for (PCLPointCloud::const_iterator it = ground.begin(); it != ground.end(); ++it){
+    point3d point(it->x, it->y, it->z);
+    // maxrange check
+    if ((m_maxRange > 0.0) && ((point - sensorOrigin).norm() > m_maxRange) ) {
+      point = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
+    }
+
+    // only clear space (ground points)
+    if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
+      free_cells.insert(m_keyRay.begin(), m_keyRay.end());
+    }
+
+    octomap::OcTreeKey endKey;
+    if (m_octree->coordToKeyChecked(point, endKey)){
+      updateMinKey(endKey, m_updateBBXMin);
+      updateMaxKey(endKey, m_updateBBXMax);
+    } else{
+      ROS_ERROR_STREAM("Could not generate Key for endpoint "<<point);
+    }
+  }
+
+  std::vector<unsigned int> indexes;
+  // all other points: free on ray, occupied on endpoint:
+  for (PCLPointCloud::const_iterator it = nonground.begin(); it != nonground.end(); ++it){
+
+    point3d point(it->x, it->y, it->z);
+    // maxrange check
+    if ((m_maxRange < 0.0) || ((point - sensorOrigin).norm() <= m_maxRange) ) {
+
+      // free cells
+      if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)){
+        free_cells.insert(m_keyRay.begin(), m_keyRay.end());
+      }
+      // occupied endpoint
+      OcTreeKey key;
+      if (m_octree->coordToKeyChecked(point, key)){
+        occupied_cells.insert(key);
+        indexes.push_back(it-nonground.begin());
+        updateMinKey(key, m_updateBBXMin);
+        updateMaxKey(key, m_updateBBXMax);
+
+#ifdef COLOR_OCTOMAP_SERVER // NB: Only read and interpret color if it's an occupied node
+        const int rgb = *reinterpret_cast<const int*>(&(it->rgb)); // TODO: there are other ways to encode color than this one
+        colors[0] = ((rgb >> 16) & 0xff);
+        colors[1] = ((rgb >> 8) & 0xff);
+        colors[2] = (rgb & 0xff);
+        m_octree->averageNodeColor(it->x, it->y, it->z, colors[0], colors[1], colors[2]);
+#endif
+      }
+    } else {// ray longer than maxrange:;
+      point3d new_end = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
+      if (m_octree->computeRayKeys(sensorOrigin, new_end, m_keyRay)){
+        free_cells.insert(m_keyRay.begin(), m_keyRay.end());
+
+        octomap::OcTreeKey endKey;
+        if (m_octree->coordToKeyChecked(new_end, endKey)){
+          free_cells.insert(endKey);
+          updateMinKey(endKey, m_updateBBXMin);
+          updateMaxKey(endKey, m_updateBBXMax);
+        } else{
+          ROS_ERROR_STREAM("Could not generate Key for endpoint "<<new_end);
+        }
+
+
+      }
+    }
+  }
+
+  // mark free cells only if not seen occupied in this cloud
+  for(KeySet::iterator it = free_cells.begin(), end=free_cells.end(); it!= end; ++it){
+    if (occupied_cells.find(*it) == occupied_cells.end()){
+
+
+      m_octree->updateNode(*it, false);
+    }
+  }
+
+  int i=0;
+  // now mark all occupied cells:
+  for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
+      double p = ((double) rand() / (RAND_MAX));
+      // Checking values that might create unexpected behaviors.
+	ROS_ERROR("YAH1");
+   	ROS_ERROR_STREAM(uncertainty_nonground[indexes[i++]].intensity);
+    if((float)uncertainty_nonground[indexes[i++]].intensity<=0||(float)uncertainty_nonground[indexes[i++]].intensity>=1) continue;
+    m_octree->updateNode(*it, (float)uncertainty_nonground[indexes[i++]].intensity);
+  }
+	ROS_ERROR("YAH");
+  // TODO: eval lazy+updateInner vs. proper insertion
+  // non-lazy by default (updateInnerOccupancy() too slow for large maps)
+  //m_octree->updateInnerOccupancy();
+  octomap::point3d minPt, maxPt;
+  ROS_DEBUG_STREAM("Bounding box keys (before): " << m_updateBBXMin[0] << " " <<m_updateBBXMin[1] << " " << m_updateBBXMin[2] << " / " <<m_updateBBXMax[0] << " "<<m_updateBBXMax[1] << " "<< m_updateBBXMax[2]);
+
+  // TODO: snap max / min keys to larger voxels by m_maxTreeDepth
+//   if (m_maxTreeDepth < 16)
+//   {
+//      OcTreeKey tmpMin = getIndexKey(m_updateBBXMin, m_maxTreeDepth); // this should give us the first key at depth m_maxTreeDepth that is smaller or equal to m_updateBBXMin (i.e. lower left in 2D grid coordinates)
+//      OcTreeKey tmpMax = getIndexKey(m_updateBBXMax, m_maxTreeDepth); // see above, now add something to find upper right
+//      tmpMax[0]+= m_octree->getNodeSize( m_maxTreeDepth ) - 1;
+//      tmpMax[1]+= m_octree->getNodeSize( m_maxTreeDepth ) - 1;
+//      tmpMax[2]+= m_octree->getNodeSize( m_maxTreeDepth ) - 1;
+//      m_updateBBXMin = tmpMin;
+//      m_updateBBXMax = tmpMax;
+//   }
+
+  // TODO: we could also limit the bbx to be within the map bounds here (see publishing check)
+  minPt = m_octree->keyToCoord(m_updateBBXMin);
+  maxPt = m_octree->keyToCoord(m_updateBBXMax);
+  ROS_DEBUG_STREAM("Updated area bounding box: "<< minPt << " - "<<maxPt);
+  ROS_DEBUG_STREAM("Bounding box keys (after): " << m_updateBBXMin[0] << " " <<m_updateBBXMin[1] << " " << m_updateBBXMin[2] << " / " <<m_updateBBXMax[0] << " "<<m_updateBBXMax[1] << " "<< m_updateBBXMax[2]);
+
+  if (m_compressMap)
+    m_octree->prune();
+
+#ifdef COLOR_OCTOMAP_SERVER
+  if (colors)
+  {
+    delete[] colors;
+    colors = NULL;
+  }
+#endif
+}
+
+
+
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground){
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
 
@@ -439,6 +690,8 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   for(KeySet::iterator it = free_cells.begin(), end=free_cells.end(); it!= end; ++it){
     if (occupied_cells.find(*it) == occupied_cells.end()){
         double p = ((double) rand() / (RAND_MAX));
+
+        //m_octree->get
         if (is_equal(p, 0.0))
           p += 1.0e-6;
         m_octree->setProbMiss(0.5*p);
@@ -455,7 +708,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
            p=0.5;
        m_octree->setProbHit(p);
 
-    m_octree->updateNode(*it, true);
+    m_octree->updateNode(*it, (float)p);
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
@@ -834,6 +1087,163 @@ void OctomapServer::publishFullOctoMap(const ros::Time& rostime) const{
 
 }
 
+void OctomapServer::filterGroundPlane(const PCLPointCloud& pc, const PCLPointCloudUncertainty& pc_uncertainty, PCLPointCloud& ground, PCLPointCloud& nonground, PCLPointCloudUncertainty& uncertainty_ground, PCLPointCloudUncertainty& uncertainty_nonground) const{
+  ground.header = pc.header;
+  nonground.header = pc.header;
+
+  if (pc.size() < 50){
+    ROS_WARN("Pointcloud in OctomapServer too small, skipping ground plane extraction");
+    nonground = pc;
+  } else {
+    // plane detection for ground plane removal:
+    pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+    pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+
+    // Create the segmentation object and set up:
+    pcl::SACSegmentation<PCLPoint> seg;
+    seg.setOptimizeCoefficients (true);
+    // TODO: maybe a filtering based on the surface normals might be more robust / accurate?
+    seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
+    seg.setMethodType(pcl::SAC_RANSAC);
+    seg.setMaxIterations(200);
+    seg.setDistanceThreshold (m_groundFilterDistance);
+    seg.setAxis(Eigen::Vector3f(0,0,1));
+    seg.setEpsAngle(m_groundFilterAngle);
+
+
+    PCLPointCloud cloud_filtered(pc);
+    PCLPointCloudUncertainty cloud_uncertainty_filtered(pc_uncertainty);
+    // Create the filtering object
+    pcl::ExtractIndices<PCLPoint> extract;
+    pcl::ExtractIndices<PCLPointUncertainty> extract_uncertainty;
+    bool groundPlaneFound = false;
+
+    while(cloud_filtered.size() > 10 && !groundPlaneFound){
+      seg.setInputCloud(cloud_filtered.makeShared());
+      seg.segment (*inliers, *coefficients);
+      if (inliers->indices.size () == 0){
+        ROS_INFO("PCL segmentation did not find any plane.");
+
+        break;
+      }
+
+      extract.setInputCloud(cloud_filtered.makeShared());
+      extract.setIndices(inliers);
+
+      extract_uncertainty.setInputCloud(cloud_uncertainty_filtered.makeShared());
+      extract_uncertainty.setIndices(inliers);
+
+      if (std::abs(coefficients->values.at(3)) < m_groundFilterPlaneDistance){
+        ROS_DEBUG("Ground plane found: %zu/%zu inliers. Coeff: %f %f %f %f", inliers->indices.size(), cloud_filtered.size(),
+                  coefficients->values.at(0), coefficients->values.at(1), coefficients->values.at(2), coefficients->values.at(3));
+        extract.setNegative (false);
+        extract.filter (ground);
+
+        // remove ground points from full pointcloud:
+        // workaround for PCL bug:
+        if(inliers->indices.size() != cloud_filtered.size()){
+          extract.setNegative(true);
+          PCLPointCloud cloud_out;
+          extract.filter(cloud_out);
+          nonground += cloud_out;
+          cloud_filtered = cloud_out;
+        }
+
+        groundPlaneFound = true;
+
+        extract_uncertainty.setNegative (false);
+        extract_uncertainty.filter (uncertainty_ground);
+
+        // remove ground points from full pointcloud:
+        // workaround for PCL bug:
+        if(inliers->indices.size() != cloud_uncertainty_filtered.size()){
+          extract_uncertainty.setNegative(true);
+          PCLPointCloudUncertainty cloud_out;
+          extract_uncertainty.filter(cloud_out);
+          uncertainty_ground += cloud_out;
+          cloud_uncertainty_filtered = cloud_out;
+        }
+
+      } else{
+        ROS_DEBUG("Horizontal plane (not ground) found: %zu/%zu inliers. Coeff: %f %f %f %f", inliers->indices.size(), cloud_filtered.size(),
+                  coefficients->values.at(0), coefficients->values.at(1), coefficients->values.at(2), coefficients->values.at(3));
+        pcl::PointCloud<PCLPoint> cloud_out;
+        extract.setNegative (false);
+        extract.filter(cloud_out);
+        nonground +=cloud_out;
+        // debug
+        //            pcl::PCDWriter writer;
+        //            writer.write<PCLPoint>("nonground_plane.pcd",cloud_out, false);
+
+        // remove current plane from scan for next iteration:
+        // workaround for PCL bug:
+        if(inliers->indices.size() != cloud_filtered.size()){
+          extract.setNegative(true);
+          cloud_out.points.clear();
+          extract.filter(cloud_out);
+          cloud_filtered = cloud_out;
+        } else{
+          cloud_filtered.points.clear();
+        }
+
+        pcl::PointCloud<PCLPointUncertainty> cloud_out_uncertainty;
+        extract_uncertainty.setNegative (false);
+        extract_uncertainty.filter(cloud_out_uncertainty);
+        uncertainty_nonground +=cloud_out_uncertainty;
+        // debug
+        //            pcl::PCDWriter writer;
+        //            writer.write<PCLPoint>("nonground_plane.pcd",cloud_out, false);
+
+        // remove current plane from scan for next iteration:
+        // workaround for PCL bug:
+        if(inliers->indices.size() != cloud_uncertainty_filtered.size()){
+          extract_uncertainty.setNegative(true);
+          cloud_out_uncertainty.points.clear();
+          extract_uncertainty.filter(cloud_out_uncertainty);
+          cloud_uncertainty_filtered = cloud_out_uncertainty;
+        } else{
+          cloud_uncertainty_filtered.points.clear();
+        }
+
+      }
+
+    }
+    // TODO: also do this if overall starting pointcloud too small?
+    if (!groundPlaneFound){ // no plane found or remaining points too small
+      ROS_WARN("No ground plane found in scan");
+
+      // do a rough fitlering on height to prevent spurious obstacles
+      pcl::PassThrough<PCLPoint> second_pass;
+      second_pass.setFilterFieldName("z");
+      second_pass.setFilterLimits(-m_groundFilterPlaneDistance, m_groundFilterPlaneDistance);
+      second_pass.setInputCloud(pc.makeShared());
+      second_pass.filter(ground);
+
+      second_pass.setFilterLimitsNegative (true);
+      second_pass.filter(nonground);
+
+      /*pcl::PassThrough<PCLPoint> second_pass_uncertainty;
+      second_pass_uncertainty.setFilterFieldName("z");
+      second_pass_uncertainty.setFilterLimits(-m_groundFilterPlaneDistance, m_groundFilterPlaneDistance);
+      second_pass_uncertainty.setInputCloud(pc.makeShared());
+      second_pass_uncertainty.filter(ground);
+
+      second_pass_uncertainty.setFilterLimitsNegative (true);
+      second_pass_uncertainty.filter(nonground);*/
+
+    }
+
+    // debug:
+    //        pcl::PCDWriter writer;
+    //        if (pc_ground.size() > 0)
+    //          writer.write<PCLPoint>("ground.pcd",pc_ground, false);
+    //        if (pc_nonground.size() > 0)
+    //          writer.write<PCLPoint>("nonground.pcd",pc_nonground, false);
+
+  }
+
+
+}
 
 void OctomapServer::filterGroundPlane(const PCLPointCloud& pc, PCLPointCloud& ground, PCLPointCloud& nonground) const{
   ground.header = pc.header;
