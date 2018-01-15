@@ -167,24 +167,29 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
     ROS_INFO("Publishing latched (single publish will take longer, all topics are prepared)");
   } else
     ROS_INFO("Publishing non-latched (topics are only prepared as needed, will only be re-published on map change");
-
+	ROS_ERROR_STREAM("yah1");
   m_markerPub = m_nh.advertise<visualization_msgs::MarkerArray>("occupied_cells_vis_array", 1, m_latchedTopics);
   m_binaryMapPub = m_nh.advertise<Octomap>("octomap_binary", 1, m_latchedTopics);
   m_fullMapPub = m_nh.advertise<Octomap>("octomap_full", 1, m_latchedTopics);
   m_pointCloudPub = m_nh.advertise<sensor_msgs::PointCloud2>("octomap_point_cloud_centers", 1, m_latchedTopics);
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
-
+	ROS_ERROR_STREAM("yah1");
   m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_in", 5);
-  m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
-  //m_tfPointCloudSub->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1));
+	ROS_ERROR_STREAM("yah1");
+m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
+ m_tfPointCloudSub->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1));
 
-  m_pointCloudUncertaintySub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_uncertainty_in", 5);
-  m_tfPointCloudUncertaintySub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
+  //sync=boost::shared_ptr<Synchronizer<MySyncPolicy> > (new Synchronizer<MySyncPolicy>(MySyncPolicy(10), *m_tfPointCloudSub));
+  //sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1));
+	ROS_ERROR_STREAM("yah1");
+
+  //m_pointCloudUncertaintySub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_uncertainty_in", 5);
+  //m_tfPointCloudUncertaintySub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudUncertaintySub, m_tfListener, m_worldFrameId, 5);
 
 
-  sync=boost::shared_ptr<Synchronizer<MySyncPolicy> > (new Synchronizer<MySyncPolicy>(MySyncPolicy(10), *m_tfPointCloudSub, *m_pointCloudUncertaintySub));
-  sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1, _2));
+  //sync_uncertainty=boost::shared_ptr<Synchronizer<MySyncPolicyUncertainty> > (new Synchronizer<MySyncPolicyUncertainty>(MySyncPolicyUncertainty(10), *m_tfPointCloudSub, *m_pointCloudUncertaintySub));
+  //sync_uncertainty->registerCallback(boost::bind(&OctomapServer::insertCloudCallback, this, _1, _2));
 
   m_octomapBinaryService = m_nh.advertiseService("octomap_binary", &OctomapServer::octomapBinarySrv, this);
   m_octomapFullService = m_nh.advertiseService("octomap_full", &OctomapServer::octomapFullSrv, this);
@@ -194,6 +199,7 @@ OctomapServer::OctomapServer(ros::NodeHandle private_nh_)
   dynamic_reconfigure::Server<OctomapServerConfig>::CallbackType f;
   f = boost::bind(&OctomapServer::reconfigureCallback, this, _1, _2);
   m_reconfigureServer.setCallback(f);
+
 }
 
 OctomapServer::~OctomapServer(){
@@ -370,7 +376,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
   ros::WallTime startTime = ros::WallTime::now();
 
-
+	ROS_ERROR_STREAM("yah");
   //
   // ground filtering in base frame
   //
@@ -560,9 +566,9 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
       double p = ((double) rand() / (RAND_MAX));
       // Checking values that might create unexpected behaviors.
-	ROS_ERROR("YAH1");
+
    	ROS_ERROR_STREAM(uncertainty_nonground[indexes[i++]].intensity);
-    if((float)uncertainty_nonground[indexes[i++]].intensity<=0||(float)uncertainty_nonground[indexes[i++]].intensity>=1) continue;
+    if((float)uncertainty_nonground[indexes[i++]].intensity<=0||(float)uncertainty_nonground[indexes[i++]].intensity>=1||std::isnan(uncertainty_nonground[indexes[i++]].intensity)) continue;
     m_octree->updateNode(*it, (float)uncertainty_nonground[indexes[i++]].intensity);
   }
 	ROS_ERROR("YAH");

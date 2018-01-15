@@ -213,8 +213,10 @@ protected:
   tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
   message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudUncertaintySub;
   tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudUncertaintySub;
-  typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> MySyncPolicy;
-  boost::shared_ptr<Synchronizer<MySyncPolicy> >sync;
+  typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::PointCloud2> MySyncPolicyUncertainty;
+  //typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2> MySyncPolicy;
+  boost::shared_ptr<Synchronizer<MySyncPolicyUncertainty> >sync_uncertainty;
+  //boost::shared_ptr<Synchronizer<MySyncPolicy> >sync;
   ros::ServiceServer m_octomapBinaryService, m_octomapFullService, m_clearBBXService, m_resetService;
   tf::TransformListener m_tfListener;
   boost::recursive_mutex m_config_mutex;
