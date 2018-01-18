@@ -376,7 +376,6 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 bool OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
   ros::WallTime startTime = ros::WallTime::now();
 
-	ROS_ERROR_STREAM("yah");
   //
   // ground filtering in base frame
   //
@@ -574,7 +573,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     if((float)uncertainty_nonground[indexes[i++]].intensity<=0||(float)uncertainty_nonground[indexes[i++]].intensity>=1||std::isnan(uncertainty_nonground[indexes[i++]].intensity)) continue;
     m_octree->updateNode(*it, (float)uncertainty_nonground[indexes[i++]].intensity);
   }
-	ROS_ERROR("YAH");
+
   // TODO: eval lazy+updateInner vs. proper insertion
   // non-lazy by default (updateInnerOccupancy() too slow for large maps)
   //m_octree->updateInnerOccupancy();
