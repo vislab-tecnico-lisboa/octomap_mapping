@@ -62,6 +62,7 @@
 
 #include <octomap_msgs/Octomap.h>
 #include <octomap_msgs/GetOctomap.h>
+#include <octomap_msgs/InsertCloud.h>
 #include <octomap_msgs/BoundingBoxQuery.h>
 #include <octomap_msgs/conversions.h>
 
@@ -99,8 +100,8 @@ public:
   virtual bool octomapFullSrv(OctomapSrv::Request  &req, OctomapSrv::GetOctomap::Response &res);
   bool clearBBXSrv(BBXSrv::Request& req, BBXSrv::Response& resp);
   bool resetSrv(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
-
-  virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
+  bool insertSrv(octomap_msgs::InsertCloud::Request& req, octomap_msgs::InsertCloud::Response& resp);
+  virtual bool insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
   virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::PointCloud2::ConstPtr& uncertainty);
 
   virtual bool openFile(const std::string& filename);
@@ -217,7 +218,7 @@ protected:
   //typedef sync_policies::ApproximateTime<sensor_msgs::PointCloud2> MySyncPolicy;
   boost::shared_ptr<Synchronizer<MySyncPolicyUncertainty> >sync_uncertainty;
   //boost::shared_ptr<Synchronizer<MySyncPolicy> >sync;
-  ros::ServiceServer m_octomapBinaryService, m_octomapFullService, m_clearBBXService, m_resetService;
+  ros::ServiceServer m_octomapBinaryService, m_octomapFullService, m_clearBBXService, m_resetService, m_insertPointCloudService;
   tf::TransformListener m_tfListener;
   boost::recursive_mutex m_config_mutex;
   dynamic_reconfigure::Server<OctomapServerConfig> m_reconfigureServer;
