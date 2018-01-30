@@ -101,8 +101,8 @@ public:
   bool clearBBXSrv(BBXSrv::Request& req, BBXSrv::Response& resp);
   bool resetSrv(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
   bool insertSrv(octomap_msgs::InsertCloud::Request& req, octomap_msgs::InsertCloud::Response& resp);
-  virtual bool insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
-  virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::PointCloud2::ConstPtr& uncertainty);
+  virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
+  virtual bool insertCloudCallback(PCLPointCloudUncertainty& pc, const ros::WallTime & startTime);
 
   virtual bool openFile(const std::string& filename);
 
@@ -141,12 +141,11 @@ protected:
   * @param ground scan endpoints on the ground plane (only clear space)
   * @param nonground all other endpoints (clear up to occupied endpoint)
   */
-  virtual void insertScan(const tf::Point& sensorOrigin, const PCLPointCloud& ground, const PCLPointCloud& nonground);
-  virtual void insertScan(const tf::Point& sensorOrigin, const PCLPointCloud& ground, const PCLPointCloud& nonground, const PCLPointCloudUncertainty& uncertainty_ground, const PCLPointCloudUncertainty& uncertainty_nonground);
-
+  virtual void insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground);
+  virtual void insertScan(const tf::Point& sensorOriginTf, const PCLPointCloudUncertainty& ground, const PCLPointCloudUncertainty& nonground);
   /// label the input cloud "pc" into ground and nonground. Should be in the robot's fixed frame (not world!)
   void filterGroundPlane(const PCLPointCloud& pc, PCLPointCloud& ground, PCLPointCloud& nonground) const;
-  void filterGroundPlane(const PCLPointCloud& pc, const PCLPointCloudUncertainty& pc_uncertainty, PCLPointCloud& ground, PCLPointCloud& nonground, PCLPointCloudUncertainty& uncertainty_ground, PCLPointCloudUncertainty& uncertainty_nonground) const;
+  void filterGroundPlane(const PCLPointCloudUncertainty& pc, PCLPointCloudUncertainty& ground, PCLPointCloudUncertainty& nonground) const;
 
   /**
   * @brief Find speckle nodes (single occupied voxels with no neighbors). Only works on lowest resolution!
