@@ -566,25 +566,24 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
     }
   }
 
-  int i=0;
   // now mark all occupied cells:
 
   for (PCLPointCloudUncertainty::const_iterator it = nonground.begin(); it != nonground.end(); ++it){
   //for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
-       point3d point(it->x, it->y, it->z);
-       KeySet jt=occupied_cells.find(*it);
+      point3d point(it->x, it->y, it->z);
+      OcTreeKey key;
+      m_octree->coordToKeyChecked(point, key);
+      //KeySet jt=occupied_cells.find(*it);
       // Checking values that might create unexpected behaviors.
 	
       //ROS_ERROR_STREAM("YOH:"<<(float)nonground[indexes[i]].intensity);
-      if(std::isnan((float)nonground[indexes[i]].intensity)||std::isinf((float)nonground[indexes[i]].intensity))
+      if(std::isnan((float)it->intensity)||std::isinf((float)it->intensity))
       {
- 	++i;
-	continue;
 
+	continue;
       }
-      ROS_ERROR_STREAM("YAH:"<<(float)it->intensity);
-      ++i;
-      m_octree->updateNode(jt, (float)it->intensity);
+     // ROS_ERROR_STREAM("YAH:"<<(float)it->intensity);
+      m_octree->updateNode(key, (float)it->intensity);
   }
 
   // TODO: eval lazy+updateInner vs. proper insertion
