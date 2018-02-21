@@ -437,7 +437,7 @@ bool OctomapServer::insertCloudCallback(PCLPointCloudUncertainty& pc, const ros:
     pass_y.filter(pc);
     pass_z.setInputCloud(pc.makeShared());
     pass_z.filter(pc);
-    filterGroundPlane(pc,pc_nonground,pc_nonground);
+    filterGroundPlane(pc,pc_ground,pc_nonground);
 
 
     // transform clouds to world frame for insertion
@@ -529,7 +529,7 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
         indexes.push_back(it-nonground.begin());
         updateMinKey(key, m_updateBBXMin);
         updateMaxKey(key, m_updateBBXMax);
-
+        m_octree->updateNode(key, (float)it->intensity);
 #ifdef COLOR_OCTOMAP_SERVER // NB: Only read and interpret color if it's an occupied node
         const int rgb = *reinterpret_cast<const int*>(&(it->rgb)); // TODO: there are other ways to encode color than this one
         colors[0] = ((rgb >> 16) & 0xff);
@@ -567,24 +567,29 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   }
 
   // now mark all occupied cells:
+  /*for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
+  //for (PCLPointCloudUncertainty::const_iterator it = nonground.begin(); it != nonground.end(); ++it){
 
-  for (PCLPointCloudUncertainty::const_iterator it = nonground.begin(); it != nonground.end(); ++it){
-  //for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
-      point3d point(it->x, it->y, it->z);
-      OcTreeKey key;
-      m_octree->coordToKeyChecked(point, key);
-      //KeySet jt=occupied_cells.find(*it);
-      // Checking values that might create unexpected behaviors.
-	
-      //ROS_ERROR_STREAM("YOH:"<<(float)nonground[indexes[i]].intensity);
+
       if(std::isnan((float)it->intensity)||std::isinf((float)it->intensity))
       {
 
 	continue;
       }
-     // ROS_ERROR_STREAM("YAH:"<<(float)it->intensity);
-      m_octree->updateNode(key, (float)it->intensity);
-  }
+
+      point3d point(it->x, it->y, it->z);
+      OcTreeKey key;
+      if(m_octree->coordToKeyChecked(point, key))
+      {	
+	     //KeySet jt=occupied_cells.find(*it);
+	     // Checking values that might create unexpected behaviors.
+	
+	     //ROS_ERROR_STREAM("YOH:"<<(float)nonground[indexes[i]].intensity);
+
+      	     // ROS_ERROR_STREAM("YAH:"<<(float)it->intensity);
+             m_octree->updateNode(key, (float)it->intensity);
+      }
+  }*/
 
   // TODO: eval lazy+updateInner vs. proper insertion
   // non-lazy by default (updateInnerOccupancy() too slow for large maps)
