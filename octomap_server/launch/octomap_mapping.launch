@@ -14,11 +14,11 @@
 		<param name="frame_id" type="string" value="world" />
 		
 		<!-- maximum range to integrate (speedup!) -->
-		<param name="sensor_model/max_range" value="100.0" />
+		<param name="sensor_model/max_range" value="20" />
 		<param name="sensor_model/hit" value="0.7" />		
-		<param name="sensor_model/miss" value="0.2" />
-		<param name="sensor_model/min" value="0.001" />
-		<param name="sensor_model/max" value="10.0" />
+		<param name="sensor_model/miss" value="0.00001" />
+		<param name="sensor_model/min"  value="0.00001" />
+		<param name="sensor_model/max"  value="0.97" />
 
 		<!-- data source to integrate (PointCloud2) -->
 		<!--<remap from="cloud_in" to="/pico_2/depth/points" />-->
